@@ -1,6 +1,9 @@
 package com.example.kafka.listener;
 
+import com.example.kafka.dto.VendaRequest;
 import com.example.kafka.service.IdempotencyService;
+import com.example.kafka.service.VendaProcessingService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,80 +11,107 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
+/**
+ * Consumer responsável por processar mensagens de venda do Kafka.
+ *
+ * Implementa garantias de idempotência e acknowledgment manual para exactly-once processing.
+ *
+ * @author Sistema Kafka
+ * @version 1.0
+ */
 @Component
 public class VendaConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(VendaConsumer.class);
-    private final IdempotencyService idempotencyService;
 
-    public VendaConsumer(IdempotencyService idempotencyService) {
+    private final IdempotencyService idempotencyService;
+    private final VendaProcessingService vendaProcessingService;
+    private final ObjectMapper objectMapper;
+
+    public VendaConsumer(IdempotencyService idempotencyService,
+                        VendaProcessingService vendaProcessingService,
+                        ObjectMapper objectMapper) {
         this.idempotencyService = idempotencyService;
+        this.vendaProcessingService = vendaProcessingService;
+        this.objectMapper = objectMapper;
     }
 
-    @KafkaListener(topics = "vendas", groupId = "app-consumer")
+    /**
+     * Processa mensagens do tópico 'vendas' com garantia de idempotência.
+     *
+     * @param record Registro da mensagem Kafka
+     * @param ack Acknowledgment manual para controle de offset
+     */
+    @KafkaListener(topics = "${app.kafka.topic.vendas:vendas}", groupId = "${spring.kafka.consumer.group-id}")
     public void listen(ConsumerRecord<String, String> record, Acknowledgment ack) {
         try {
             String key = record.key();
             String value = record.value();
             
-            log.info("Recebido key={} value={} offset={} partition={}",
-                    key, value, record.offset(), record.partition());
+            log.info("Recebida mensagem - key={}, offset={}, partition={}",
+                    key, record.offset(), record.partition());
 
-            // Extrai o pedidoId do JSON
-            String orderId = idempotencyService.extractOrderId(value);
-            
-            // Se não conseguiu extrair do JSON, usa a key do Kafka como fallback
-            if (orderId == null || orderId.isEmpty()) {
-                orderId = key != null ? key : "unknown-" + record.offset();
-                log.warn("Não foi possível extrair pedidoId do JSON, usando key/offset como identificador: {}", orderId);
-            } else {
-                log.info("PedidoId extraído do JSON: {}", orderId);
-            }
-
-            // Verifica idempotência: se já foi processado, apenas confirma o offset
-            boolean canProcess = idempotencyService.canProcessAndMark(orderId);
-            log.info("Pode processar? {} (pedidoId={})", canProcess, orderId);
-            
-            if (!canProcess) {
-                log.warn("Mensagem duplicada ignorada - pedidoId={} já foi processado. " +
-                        "Offset={}, Partition={}", orderId, record.offset(), record.partition());
-                // Ainda confirma o offset para não reprocessar a mesma mensagem
+            // Parse do JSON para DTO
+            VendaRequest vendaRequest = parseVendaRequest(value);
+            if (vendaRequest == null) {
+                log.error("Não foi possível fazer parse da mensagem, pulando - offset={}", record.offset());
                 ack.acknowledge();
                 return;
             }
 
-            // Processa a mensagem apenas se for nova
-            log.info("Processando nova mensagem - pedidoId={}", orderId);
-            
-            // TODO: Aqui você faria o processamento real da venda:
-            // - Salvar no banco de dados
-            // - Atualizar estoque
-            // - Enviar email de confirmação
-            // - etc.
-            
-            // Simulação de processamento
-            processVenda(value, orderId);
+            // Determina o ID para idempotência
+            String orderId = determineOrderId(vendaRequest, key, record);
 
-            // Confirma o offset apenas após processamento bem-sucedido
+            // Verifica e marca para processamento idempotente
+            if (!idempotencyService.canProcessAndMark(orderId)) {
+                log.warn("Mensagem duplicada ignorada - orderId={}, offset={}, partition={}",
+                        orderId, record.offset(), record.partition());
+                ack.acknowledge();
+                return;
+            }
+
+            // Processa a venda
+            log.info("Processando nova venda - orderId={}, pedidoId={}", orderId, vendaRequest.getPedidoId());
+            vendaProcessingService.processVenda(vendaRequest, orderId);
+
+            // Confirma o offset apenas após sucesso
             ack.acknowledge();
-            log.info("Mensagem processada com sucesso - pedidoId={}", orderId);
+            log.info("Venda processada com sucesso - orderId={}, pedidoId={}", orderId, vendaRequest.getPedidoId());
 
         } catch (Exception ex) {
             log.error("Erro ao processar mensagem - offset={}, partition={}", 
                     record.offset(), record.partition(), ex);
-            // Lança exceção para que o DefaultErrorHandler trate (retries e DLQ)
-            throw ex;
+            throw ex; // Relança para ativação do error handler (retries + DLQ)
         }
     }
 
-    private void processVenda(String jsonPayload, String orderId) {
-        // Simulação de processamento
-        // Em produção, aqui você faria:
-        // - Parse do JSON para objeto Venda
-        // - Validações de negócio
-        // - Persistência no banco
-        // - Cálculos, atualizações, etc.
-        
-        log.debug("Processando venda - pedidoId={}, payload={}", orderId, jsonPayload);
+    /**
+     * Faz o parse do JSON para VendaRequest.
+     */
+    private VendaRequest parseVendaRequest(String json) {
+        try {
+            return objectMapper.readValue(json, VendaRequest.class);
+        } catch (Exception e) {
+            log.error("Erro ao fazer parse do JSON: {}", json, e);
+            return null;
+        }
+    }
+
+    /**
+     * Determina o ID para controle de idempotência.
+     */
+    private String determineOrderId(VendaRequest vendaRequest, String key, ConsumerRecord<String, String> record) {
+        if (vendaRequest.getPedidoId() != null) {
+            return vendaRequest.getPedidoId().toString();
+        }
+
+        if (key != null && !key.trim().isEmpty()) {
+            log.warn("PedidoId não encontrado, usando key do Kafka: {}", key);
+            return key;
+        }
+
+        String fallbackId = "unknown-" + record.offset() + "-" + record.partition();
+        log.warn("Nem pedidoId nem key disponíveis, usando fallback: {}", fallbackId);
+        return fallbackId;
     }
 }
