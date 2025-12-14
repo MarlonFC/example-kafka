@@ -6,121 +6,120 @@ import org.springframework.stereotype.Service;
 
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
- * Serviço de idempotência para garantir que mensagens com o mesmo pedidoId
+ * Serviço de idempotência para garantir que mensagens com o mesmo orderId
  * sejam processadas apenas uma vez.
  * 
- * NOTA: Esta implementação usa um Set em memória. Para produção, considere
- * usar um banco de dados (Redis, PostgreSQL, etc.) para persistência e
- * compartilhamento entre múltiplas instâncias.
+ * IMPORTANTE: Esta implementação usa um Set em memória para demonstração.
+ * Para produção, considere usar um banco de dados distribuído (Redis, PostgreSQL, etc.)
+ * para persistência e compartilhamento entre múltiplas instâncias da aplicação.
+ *
+ * @author Sistema Kafka
+ * @version 1.0
  */
 @Service
 public class IdempotencyService {
 
     private static final Logger log = LoggerFactory.getLogger(IdempotencyService.class);
     
-    // Pattern para extrair pedidoId do JSON: "pedidoId":123 ou "pedidoId": 123 ou 'pedidoId':123
-    // Suporta tanto aspas duplas quanto simples, com ou sem espaços
-    private static final Pattern PEDIDO_ID_PATTERN = Pattern.compile(
-        "[\"']pedidoId[\"']\\s*:\\s*(\\d+)", 
-        Pattern.CASE_INSENSITIVE
-    );
-    
-    // Em produção, substitua por um banco de dados compartilhado
+    /**
+     * Cache em memória para IDs processados.
+     * Em produção, substitua por um banco de dados distribuído.
+     */
     private final Set<String> processedIds = ConcurrentHashMap.newKeySet();
 
     /**
-     * Extrai o pedidoId do JSON da mensagem usando regex
-     * Alternativa sem depender de bibliotecas externas além do Spring Boot
-     */
-    public String extractOrderId(String jsonPayload) {
-        if (jsonPayload == null || jsonPayload.trim().isEmpty()) {
-            log.warn("JSON payload está vazio ou null");
-            return null;
-        }
-        
-        try {
-            // Remove espaços em branco para facilitar o match
-            String cleanJson = jsonPayload.trim().replaceAll("\\s+", " ");
-            log.debug("Tentando extrair pedidoId do JSON: {}", cleanJson);
-            
-            Matcher matcher = PEDIDO_ID_PATTERN.matcher(cleanJson);
-            if (matcher.find()) {
-                String extractedId = matcher.group(1);
-                log.debug("PedidoId extraído com sucesso: {}", extractedId);
-                return extractedId;
-            } else {
-                log.warn("Não foi possível encontrar 'pedidoId' no JSON: {}", cleanJson);
-            }
-        } catch (Exception e) {
-            log.error("Erro ao extrair pedidoId do JSON: {}", jsonPayload, e);
-        }
-        return null;
-    }
-
-    /**
-     * Verifica se o pedido já foi processado
+     * Verifica se o pedido já foi processado.
+     *
+     * @param orderId ID do pedido para verificação
+     * @return true se já foi processado, false caso contrário
      */
     public boolean isAlreadyProcessed(String orderId) {
-        if (orderId == null) {
+        if (orderId == null || orderId.trim().isEmpty()) {
             return false;
         }
-        return processedIds.contains(orderId);
+        boolean result = processedIds.contains(orderId);
+        log.debug("Verificação de idempotência - orderId={}, jaProcessado={}", orderId, result);
+        return result;
     }
 
     /**
-     * Marca um pedido como processado
+     * Marca um pedido como processado.
+     *
+     * @param orderId ID do pedido para marcar como processado
      */
     public void markAsProcessed(String orderId) {
-        if (orderId != null) {
+        if (orderId != null && !orderId.trim().isEmpty()) {
             processedIds.add(orderId);
-            log.debug("Pedido {} marcado como processado", orderId);
+            log.debug("OrderId {} marcado como processado. Total processados: {}",
+                     orderId, processedIds.size());
         }
     }
 
     /**
      * Verifica se pode processar (não foi processado antes) e marca como processado
+     * de forma atômica.
+     *
+     * @param orderId ID do pedido para verificação e marcação
      * @return true se pode processar (não foi processado antes), false caso contrário
      */
     public boolean canProcessAndMark(String orderId) {
-        if (orderId == null) {
-            log.warn("PedidoId é null - permitindo processamento (pode ser mensagem antiga)");
-            return true; // Permite processar se não tiver pedidoId (mensagens antigas)
+        if (orderId == null || orderId.trim().isEmpty()) {
+            log.warn("OrderId é null ou vazio - permitindo processamento (compatibilidade com mensagens antigas)");
+            return true;
         }
         
-        // Verifica se já existe ANTES de tentar adicionar (para log mais claro)
+        // Verifica se já existe ANTES de tentar adicionar
         boolean alreadyExists = processedIds.contains(orderId);
         
         if (alreadyExists) {
-            log.warn("Pedido {} JÁ FOI PROCESSADO anteriormente! Total de pedidos processados: {}", 
+            log.warn("OrderId {} JÁ FOI PROCESSADO anteriormente! Total processados: {}",
                     orderId, processedIds.size());
             return false;
         }
         
-        // Adiciona ao set (atomicamente)
+        // Adiciona ao set de forma atômica
         processedIds.add(orderId);
-        log.info("Pedido {} é NOVO - marcando como processado. Total agora: {}", 
+        log.info("OrderId {} é NOVO - marcado como processado. Total agora: {}",
                 orderId, processedIds.size());
         return true;
     }
 
     /**
-     * Limpa o cache (útil para testes ou limpeza periódica)
-     * Em produção, implementar TTL ou limpeza baseada em data
+     * Limpa o cache de IDs processados.
+     *
+     * Útil para testes ou limpeza periódica. Em produção, implemente TTL
+     * ou limpeza baseada em data para evitar crescimento ilimitado.
      */
     public void clear() {
+        int previousSize = processedIds.size();
         processedIds.clear();
-        log.info("Cache de idempotência limpo");
+        log.info("Cache de idempotência limpo - {} IDs removidos", previousSize);
     }
 
     /**
-     * Retorna o número de pedidos processados (útil para monitoramento)
+     * Retorna o número de pedidos processados.
+     *
+     * @return quantidade de pedidos únicos processados
      */
     public int getProcessedCount() {
         return processedIds.size();
+    }
+
+    /**
+     * Remove um ID específico do cache (útil para testes).
+     *
+     * @param orderId ID a ser removido
+     * @return true se foi removido, false se não existia
+     */
+    public boolean removeProcessed(String orderId) {
+        if (orderId == null || orderId.trim().isEmpty()) {
+            return false;
+        }
+        boolean removed = processedIds.remove(orderId);
+        log.debug("OrderId {} removido do cache: {}", orderId, removed);
+        return removed;
     }
 }
 

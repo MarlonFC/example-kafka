@@ -1,20 +1,90 @@
 spring:
+  application:
+    name: kafka-vendas-api
+    version: 1.0.0
+
   kafka:
     bootstrap-servers: localhost:9092
     consumer:
-      group-id: app-consumer
+      group-id: vendas-consumer-group
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      enable-auto-commit: false
+      isolation-level: read_committed
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 2147483647
+      enable-idempotence: true
 
 server:
   port: 8080
 
+# Configurações customizadas da aplicação
+app:
+  kafka:
+    topic:
+      vendas: vendas
+    retries:
+      max: 3
+      backoff-ms: 1000
+
+# Configuração do Swagger/OpenAPI
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    display-request-duration: true
+    groups-order: DESC
+    operations-sorter: method
+    disable-swagger-default-url: true
+  info:
+    title: API de Vendas com Kafka
+    description: |
+      API REST para processamento de vendas utilizando Apache Kafka como sistema de mensageria.
+      
+      ## Características:
+      - **Exactly-once delivery**: Garantia de que cada venda é processada exatamente uma vez
+      - **Idempotência**: Proteção contra duplicatas usando IDs únicos
+      - **Dead Letter Queue**: Mensagens com erro são enviadas para DLQ após 3 tentativas
+      - **Acknowledgment manual**: Controle preciso sobre o processamento de mensagens
+      
+      ## Monitoramento:
+      - Kafdrop UI: http://localhost:9000 (quando executando via Docker)
+      - Métricas: /actuator/metrics
+      - Health check: /actuator/health
+    version: 1.0.0
+    contact:
+      name: Equipe de Desenvolvimento
+      email: dev@empresa.com
+    license:
+      name: MIT License
+
+# Configurações do Actuator para monitoramento
 management:
   endpoints:
     web:
       exposure:
-        include: health,metrics,prometheus
+        include: health, metrics, prometheus, info
+  endpoint:
+    health:
+      show-details: always
+  info:
+    env:
+      enabled: true
+
+# Configurações de logging
+logging:
+  level:
+    com.example.kafka: INFO
+    org.apache.kafka: WARN
+    org.springframework.kafka: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%logger{36}] - %msg%n"
+  file:
+    name: logs/vendas-kafka.log
+    max-size: 10MB
+    max-history: 5
