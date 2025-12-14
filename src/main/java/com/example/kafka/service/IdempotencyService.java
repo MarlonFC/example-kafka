@@ -36,7 +36,7 @@ public class IdempotencyService {
      * @return true se já foi processado, false caso contrário
      */
     public boolean isAlreadyProcessed(String orderId) {
-        if (orderId == null) {
+        if (orderId == null || orderId.trim().isEmpty()) {
             return false;
         }
         boolean result = processedIds.contains(orderId);
@@ -50,7 +50,7 @@ public class IdempotencyService {
      * @param orderId ID do pedido para marcar como processado
      */
     public void markAsProcessed(String orderId) {
-        if (orderId != null) {
+        if (orderId != null && !orderId.trim().isEmpty()) {
             processedIds.add(orderId);
             log.debug("OrderId {} marcado como processado. Total processados: {}",
                      orderId, processedIds.size());
@@ -65,8 +65,8 @@ public class IdempotencyService {
      * @return true se pode processar (não foi processado antes), false caso contrário
      */
     public boolean canProcessAndMark(String orderId) {
-        if (orderId == null) {
-            log.warn("OrderId é null - permitindo processamento (compatibilidade com mensagens antigas)");
+        if (orderId == null || orderId.trim().isEmpty()) {
+            log.warn("OrderId é null ou vazio - permitindo processamento (compatibilidade com mensagens antigas)");
             return true;
         }
         
@@ -114,7 +114,7 @@ public class IdempotencyService {
      * @return true se foi removido, false se não existia
      */
     public boolean removeProcessed(String orderId) {
-        if (orderId == null) {
+        if (orderId == null || orderId.trim().isEmpty()) {
             return false;
         }
         boolean removed = processedIds.remove(orderId);

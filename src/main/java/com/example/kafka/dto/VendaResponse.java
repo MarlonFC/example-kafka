@@ -1,11 +1,13 @@
 package com.example.kafka.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
  * DTO para resposta de operações de venda.
  */
 @Schema(description = "Resposta da operação de venda")
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class VendaResponse {
 
     @Schema(description = "Mensagem de status", example = "Venda enviada para processamento")

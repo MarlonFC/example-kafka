@@ -1,5 +1,6 @@
 package com.example.kafka.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
@@ -13,6 +14,7 @@ import java.math.BigDecimal;
  * Representa os dados necessários para criar uma nova venda no sistema.
  */
 @Schema(description = "Dados da venda")
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class VendaRequest {
 
     @Schema(description = "ID único do pedido", example = "12345")
@@ -98,5 +100,24 @@ public class VendaRequest {
                 ", quantidade=" + quantidade +
                 ", emailCliente='" + emailCliente + '\'' +
                 '}';
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) return true;
+        if (obj == null || getClass() != obj.getClass()) return false;
+
+        VendaRequest that = (VendaRequest) obj;
+
+        if (!java.util.Objects.equals(pedidoId, that.pedidoId)) return false;
+        if (!java.util.Objects.equals(produto, that.produto)) return false;
+        if (!java.util.Objects.equals(valor, that.valor)) return false;
+        if (!java.util.Objects.equals(quantidade, that.quantidade)) return false;
+        return java.util.Objects.equals(emailCliente, that.emailCliente);
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(pedidoId, produto, valor, quantidade, emailCliente);
     }
 }

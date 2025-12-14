@@ -5,7 +5,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -67,6 +69,42 @@ public class GlobalExceptionHandler {
         log.warn("Argumento ilegal: {}", ex.getMessage());
 
         return ResponseEntity.badRequest().body(response);
+    }
+
+    /**
+     * Trata erros de parsing de JSON (requisições com JSON malformado).
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<VendaResponse> handleHttpMessageNotReadableException(
+            HttpMessageNotReadableException ex) {
+
+        VendaResponse response = new VendaResponse(
+            "JSON malformado ou inválido. Verifique a estrutura da requisição.",
+            null,
+            "INVALID_JSON"
+        );
+
+        log.warn("Erro de parsing JSON: {}", ex.getMessage());
+
+        return ResponseEntity.badRequest().body(response);
+    }
+
+    /**
+     * Trata erros de Content-Type não suportado.
+     */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<VendaResponse> handleHttpMediaTypeNotSupportedException(
+            HttpMediaTypeNotSupportedException ex) {
+
+        VendaResponse response = new VendaResponse(
+            "Content-Type não suportado. Use 'application/json' para esta API.",
+            null,
+            "UNSUPPORTED_MEDIA_TYPE"
+        );
+
+        log.warn("Content-Type não suportado: {}", ex.getMessage());
+
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(response);
     }
 
     /**
